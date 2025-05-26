@@ -15,7 +15,8 @@ An advanced neural network-based audio upscaling application that enhances the q
 
  ## Features to be developed
 
- 
+- **Multi-agent system for coordinated processing
+ - ** GPU-accelerated audio processing  
  - **Multi model mode 
  - **Processing power slider in ui 
  - **Gpu selection in ui
