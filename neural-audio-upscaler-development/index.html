@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Neural Audio Upscaler</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background-color: #f5f5f5;
+      color: #333;
+    }
+    
+    .container {
+      max-width: 650px;
+      margin: 0 auto;
+      background-color: #fff;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      padding: 20px;
+    }
+    
+    h1 {
+      text-align: center;
+      margin-top: 0;
+      margin-bottom: 20px;
+    }
+    
+    .upload-btn {
+      display: block;
+      width: 100%;
+      padding: 12px;
+      background-color: #4a6da7;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      font-size: 16px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+    
+    .upload-btn:hover {
+      background-color: #3a5d97;
+    }
+    
+    .upload-btn:disabled {
+      background-color: #cccccc;
+      cursor: not-allowed;
+    }
+    
+    .terminal {
+      margin-top: 20px;
+      background-color: #2b2b2b;
+      color: #f0f0f0;
+      border-radius: 4px;
+      padding: 12px;
+      font-family: 'Courier New', monospace;
+      height: 250px;
+      overflow-y: auto;
+    }
+    
+    .log-line {
+      margin: 4px 0;
+      line-height: 1.4;
+    }
+    
+    .info { color: #64b5f6; }
+    .success { color: #8bc34a; }
+    .error { color: #ff5252; }
+    .warning { color: #ffb74d; }
+    
+    .progress-container {
+      margin-top: 10px;
+      background-color: #444;
+      border-radius: 4px;
+      height: 15px;
+      overflow: hidden;
+    }
+    
+    .progress-bar {
+      height: 100%;
+      background-color: #8bc34a;
+      width: 0%;
+      transition: width 0.3s;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Neural Audio Upscaler</h1>
+    
+    <button id="upload-btn" class="upload-btn">Select Audio File</button>
+    
+    <div class="terminal" id="terminal">
+      <div class="log-line info">Ready to upscale audio. Click "Select Audio File" to begin.</div>
+    </div>
+  </div>
+  
+  <script src="renderer.js"></script>
+</body>
+</html>
