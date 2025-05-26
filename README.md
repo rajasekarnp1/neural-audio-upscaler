@@ -2,24 +2,28 @@
 
 An advanced neural network-based audio upscaling application that enhances the quality of audio files using state-of-the-art deep learning techniques.
 
-##Problems 
-**missing ai models
-**this is just a sample code ,the upscalling and file handling needs to improved
-**needs more active development
-**implement the ai components  in mojo[with auto machine specific optimizations]
-**implement the file processing and other components in python or other suitable language  [currently written in javascript]
-**detailed innerworking of audio processing and upscalling is missing
-**binary package for easy instalation
+## Problems 
 
- ##Features to be developed
- **multi model mode 
- **processing power slider in ui 
- **gpu selection in ui
- **distributed workload between cpu and gpu
- ** real time upscalling 
- ** cross platform with binaries 
- ** compress the upscalled file to have more quality than the orginal file  
+
+-**missing ai models
+-**this is just a sample code ,the upscalling and file handling needs to improved
+-**needs more active development
+-**implement the ai components  in mojo[with auto machine specific optimizations]
+-**implement the file processing and other components in python or other suitable language  [currently written in javascript]
+-**detailed innerworking of audio processing and upscalling is missing
+-**binary package for easy instalation
+
+ ## Features to be developed
+
  
+ - **Multi model mode 
+ - **Processing power slider in ui 
+ - **Gpu selection in ui
+ - **Distributed workload between cpu and gpu
+ - ** Real time upscalling 
+ - ** Cross platform with binaries 
+ - ** Compress the upscalled file to have more quality than the orginal file  
+ -** include option to adjust the upscalled audio quality 
  
 
 
