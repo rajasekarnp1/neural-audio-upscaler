@@ -41,6 +41,7 @@ npm install
 # Start the application
 npm start
 ```
+![image](https://github.com/user-attachments/assets/c2b13b35-3443-4f67-9ca0-167a70de6f10)
 
 ### Web Interface
 
