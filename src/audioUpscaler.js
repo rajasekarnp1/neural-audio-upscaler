@@ -336,39 +336,35 @@ class AudioUpscaler {
         });
       }
       
-      // Step 5: Clean up temp files
+      // Step 6: If in training mode, update model with this example
+      // This must happen BEFORE cleaning up tempDir if upscaledPath is used as a target.
+      if (this.options.trainingMode && this.options.preserveQuality) {
+        // processingPath is the input to the model, upscaledPath is the model's direct output
+        if (processingPath && upscaledPath) {
+          try {
+            console.log(`Attempting to fine-tune ${audioType} model with ${processingPath} and ${upscaledPath}...`);
+            await this.modelTrainer.fineTuneModel(
+              model,
+              [processingPath], // Low quality input to the model
+              [upscaledPath],   // High quality output from the model (before post-processing)
+              audioType,
+              (progress) => { console.log(`Fine-tuning progress for ${audioType} model: ${progress}%`); }
+            );
+            console.log(`Fine-tuning for ${audioType} model completed.`);
+          } catch (tuneError) {
+            console.warn(`Warning: Fine-tuning model ${audioType} failed. Continuing without update. Error:`, tuneError);
+          }
+        } else {
+          console.warn(`Warning: Skipping fine-tuning for ${audioType} model due to missing processingPath or upscaledPath.`);
+        }
+      }
+
+      // Step 7: Clean up temp files (moved after potential fine-tuning)
       try {
         await fs.rm(tempDir, { recursive: true, force: true });
+        console.log(`Temporary directory ${tempDir} cleaned up.`);
       } catch (err) {
         console.warn('Failed to clean up temp files:', err);
-      }
-      
-      // Step 6: If in training mode, update model with this example
-      if (this.options.trainingMode && this.options.preserveQuality) {
-        console.log('Updating model with new example (training mode)...');
-        
-        // This is a simplified approach - in a real implementation, 
-        // we would collect examples and train in batches
-        try {
-          // In a real implementation, we would save the file paths to a database
-          // and train the model in a separate process or on a schedule
-          console.log(`Saved training example: ${inputPath} -> ${outputPath}`);
-          console.log('Model would be updated in a production environment');
-          
-          // Skip actual training for now since it's causing issues
-          // await this.modelTrainer.fineTuneModel(
-          //   model,
-          //   [inputPath], // Low quality
-          //   [outputPath], // High quality (our result)
-          //   audioType,
-          //   () => {} // No progress reporting for background training
-          // );
-          
-          console.log('Training example recorded for future model updates');
-        } catch (err) {
-          console.warn('Failed to update model:', err);
-          // Continue even if training fails
-        }
       }
       
       this.reportProgress(100);
@@ -390,114 +386,207 @@ class AudioUpscaler {
   }
   
   async readAudioFile(filePath) {
-    // In a real implementation, this would parse the WAV file properly
-    // For this demo, we'll return a simple structure
-    const buffer = await fs.readFile(filePath);
+    const wavBuffer = await fs.readFile(filePath);
+
+    // Parse WAV header (simplified)
+    const sampleRate = wavBuffer.readUInt32LE(24);
+    const numChannels = wavBuffer.readUInt16LE(22);
+    const bitsPerSample = wavBuffer.readUInt16LE(34);
+    const dataChunkId = wavBuffer.toString('ascii', 36, 40); // Should be 'data'
+
+    let dataOffset = 44; // Standard WAV header size including 'data' chunk header
+    let dataSize = wavBuffer.readUInt32LE(40);
+
+    // Handle potential non-PCM formats or LIST INFO chunks before 'data'
+    // This is a simplified check; a robust parser would iterate through chunks.
+    if (dataChunkId !== 'data') {
+        // Attempt to find 'data' chunk, common in some WAV files (e.g., with LIST INFO)
+        let offset = 12; // Skip RIFF, size, WAVE
+        while(offset < wavBuffer.length - 8) {
+            const chunkId = wavBuffer.toString('ascii', offset, offset + 4);
+            const chunkSize = wavBuffer.readUInt32LE(offset + 4);
+            if (chunkId === 'data') {
+                dataOffset = offset + 8;
+                dataSize = chunkSize;
+                break;
+            }
+            offset += 8 + chunkSize;
+        }
+        if (dataOffset === 44 && dataChunkId !== 'data') { // Still not found
+             throw new Error(`Could not find 'data' chunk in WAV file: ${filePath}`);
+        }
+    }
+
+    const numSamplesPerChannel = dataSize / (bitsPerSample / 8) / numChannels;
+    const channelSamples = [];
+    const bytesPerSample = bitsPerSample / 8;
+    const scale = 1.0 / (1 << (bitsPerSample - 1));
+
+    for (let channel = 0; channel < numChannels; channel++) {
+      const samples = new Float32Array(numSamplesPerChannel);
+      for (let i = 0; i < numSamplesPerChannel; i++) {
+        const sampleOffset = dataOffset + (i * numChannels + channel) * bytesPerSample;
+
+        let sampleVal = 0;
+        if (bitsPerSample === 16) {
+          sampleVal = wavBuffer.readInt16LE(sampleOffset);
+        } else if (bitsPerSample === 24) {
+          const b1 = wavBuffer[sampleOffset];
+          const b2 = wavBuffer[sampleOffset + 1];
+          const b3 = wavBuffer[sampleOffset + 2];
+          sampleVal = ((b3 << 16) | (b2 << 8) | b1) << 8 >> 8;
+        } else if (bitsPerSample === 32 && wavBuffer.readUInt16LE(20) === 1) { // PCM
+          sampleVal = wavBuffer.readInt32LE(sampleOffset);
+        } else if (bitsPerSample === 32 && wavBuffer.readUInt16LE(20) === 3) { // IEEE Float
+          sampleVal = wavBuffer.readFloatLE(sampleOffset);
+          // For IEEE float, scale is not needed if it's already [-1, 1]
+          // However, raw PCM f32le is often not normalized, so we might still scale.
+          // For simplicity, we'll assume direct use or that it needs scaling.
+          // If it's already normalized, this might scale it down too much.
+          // A more robust solution would check the actual range or metadata.
+          samples[i] = sampleVal; // Assuming it's already in -1 to 1 range
+          continue;
+        } else {
+          // Default or unsupported
+          sampleVal = wavBuffer.readInt16LE(sampleOffset); // Fallback to 16-bit
+        }
+        samples[i] = sampleVal * scale;
+      }
+      channelSamples.push(samples);
+    }
     
     return {
-      buffer,
+      buffer: wavBuffer, // Original buffer
+      samples: channelSamples,
+      sampleRate,
+      numChannels,
+      bitsPerSample,
       filePath
     };
   }
   
   async processAudio(audioData, model, progressCallback) {
-    // This is where the actual audio upscaling would happen
-    // In a real implementation, we would:
-    // 1. Convert buffer to audio samples
-    // 2. Apply ML model to enhance audio in frequency domain
-    // 3. Convert back to buffer
+    // audioData is now expected to have:
+    // { buffer, samples (array of Float32Array), sampleRate, numChannels, bitsPerSample, filePath }
     
     try {
-      // Create a spectrogram for frequency-domain processing
-      const spectrogram = new Spectrogram();
-      
-      // Convert to WAV format for processing
-      const wavBuffer = audioData.buffer;
-      
-      // Parse WAV header (simplified)
-      const sampleRate = wavBuffer.readUInt32LE(24);
-      const numChannels = wavBuffer.readUInt16LE(22);
-      const bitsPerSample = wavBuffer.readUInt16LE(34);
-      const dataSize = wavBuffer.readUInt32LE(40);
-      
-      // Extract audio data
-      const dataOffset = 44; // Standard WAV header size
-      const numSamples = dataSize / (bitsPerSample / 8) / numChannels;
-      
-      // Process each channel
       const enhancedChannels = [];
-      
+      const numChannels = audioData.numChannels; // Get from new audioData structure
+
       for (let channel = 0; channel < numChannels; channel++) {
-        // Extract channel data
-        const samples = new Float32Array(numSamples / numChannels);
-        const bytesPerSample = bitsPerSample / 8;
-        const scale = 1.0 / (1 << (bitsPerSample - 1));
+        const samples = audioData.samples[channel]; // Use pre-parsed samples
         
-        for (let i = 0; i < samples.length; i++) {
-          const sampleOffset = dataOffset + (i * numChannels + channel) * bytesPerSample;
-          
-          // Read sample based on bit depth
-          let sample = 0;
-          if (bitsPerSample === 16) {
-            sample = wavBuffer.readInt16LE(sampleOffset);
-          } else if (bitsPerSample === 24) {
-            // 24-bit samples need special handling
-            const b1 = wavBuffer[sampleOffset];
-            const b2 = wavBuffer[sampleOffset + 1];
-            const b3 = wavBuffer[sampleOffset + 2];
-            sample = ((b3 << 16) | (b2 << 8) | b1) << 8 >> 8; // Sign extension
-          } else if (bitsPerSample === 32) {
-            sample = wavBuffer.readInt32LE(sampleOffset);
-          } else {
-            // Default to 16-bit
-            sample = wavBuffer.readInt16LE(sampleOffset);
-          }
-          
-          // Normalize to [-1, 1]
-          samples[i] = sample * scale;
-        }
+        // Actual model inference
+        const inputTensor = tf.tensor3d(samples, [1, samples.length, 1]);
+        const outputTensor = model.predict(inputTensor);
+        const enhancedSamplesArray = await outputTensor.data();
+        const enhancedSamples = new Float32Array(enhancedSamplesArray);
         
-        // For demonstration, we'll simulate processing with progress updates
-        // In a real implementation, we would:
-        // 1. Convert to spectrogram
-        // 2. Apply neural model to enhance spectrogram
-        // 3. Reconstruct phase
-        // 4. Convert back to time domain
+        tf.dispose([inputTensor, outputTensor]);
         
-        // Simulate processing
-        await new Promise(resolve => setTimeout(resolve, 200));
         if (progressCallback) {
-          progressCallback((channel + 0.3) / numChannels * 100);
+          progressCallback((channel + 0.5) / numChannels * 100);
         }
         
-        // Just copy the samples for now
-        enhancedChannels.push(samples);
+        enhancedChannels.push(enhancedSamples);
         
         if (progressCallback) {
           progressCallback((channel + 1) / numChannels * 100);
         }
       }
       
-      // Create a new WAV buffer with enhanced audio
-      // For demonstration, we'll just copy the original buffer
-      
       return {
-        buffer: wavBuffer,
-        enhancedChannels,
-        sampleRate,
-        numChannels,
-        bitsPerSample
+        buffer: audioData.buffer, // Pass original buffer through
+        enhancedChannels, // This is the primary output
+        sampleRate: audioData.sampleRate,
+        numChannels: audioData.numChannels,
+        bitsPerSample: audioData.bitsPerSample, // Pass through for saveAudioFile
+        filePath: audioData.filePath
       };
     } catch (error) {
       console.error('Error in audio processing:', error);
-      // Return original data on error
-      return audioData;
+      // Return original data on error in case of failure during TFJS processing
+      // This might need more robust error handling, e.g. propagating the error.
+      return {
+        ...audioData,
+        enhancedChannels: audioData.samples // return original samples if processing failed
+      };
     }
   }
   
   async saveAudioFile(audioData, outputPath) {
-    // Write the processed audio buffer to the output file
-    await fs.writeFile(outputPath, audioData.buffer);
+    // audioData contains: { enhancedChannels, sampleRate, numChannels, bitsPerSample (original) }
+    // We will save as f32le raw PCM temporarily, then convert to WAV.
+    // Output WAV will be pcm_s16le by default as it's most compatible,
+    // unless original bitsPerSample suggests higher (e.g. 24 or 32 bit).
+
+    const { enhancedChannels, sampleRate, numChannels } = audioData;
+
+    if (!enhancedChannels || enhancedChannels.length === 0) {
+      throw new Error('No enhanced audio data to save.');
+    }
+
+    const numSamplesPerChannel = enhancedChannels[0].length;
+    const totalSamples = numSamplesPerChannel * numChannels;
+    const interleavedSamples = new Float32Array(totalSamples);
+
+    for (let i = 0; i < numSamplesPerChannel; i++) {
+      for (let c = 0; c < numChannels; c++) {
+        interleavedSamples[i * numChannels + c] = enhancedChannels[c][i];
+      }
+    }
+
+    const rawPcmBuffer = Buffer.from(interleavedSamples.buffer);
+    const tempRawPath = path.join(path.dirname(outputPath), `_temp_raw_audio_${Date.now()}.pcm`);
+
+    try {
+      await fs.writeFile(tempRawPath, rawPcmBuffer);
+
+      await new Promise((resolve, reject) => {
+        let outputCodec = 'pcm_s16le'; // Default to 16-bit WAV
+        if (audioData.bitsPerSample === 24) {
+          outputCodec = 'pcm_s24le';
+        } else if (audioData.bitsPerSample === 32) {
+          // Could be pcm_s32le or pcm_f32le.
+          // Since our processing is float based, pcm_f32le might be better to preserve quality.
+          // However, pcm_s32le is also an option for integer-based 32-bit.
+          // Let's stick to what ffmpeg supports well for WAV.
+          // fluent-ffmpeg might pick pcm_f32le if not specified and input is f32le.
+          // For now, let's allow higher bit depth if original was high.
+          outputCodec = 'pcm_s24le'; // Defaulting to 24 for >16 for wider compatibility than 32.
+                                     // User can change this if specific 32-bit WAV is needed.
+                                     // Or, we can use pcm_f32le if input was float32.
+                                     // For simplicity with the current requirement, let's use s16/s24.
+        }
+
+
+        ffmpeg()
+          .input(tempRawPath)
+          .inputFormat('f32le')
+          .inputOptions([
+            `-ar ${sampleRate}`,
+            `-ac ${numChannels}`
+          ])
+          .output(outputPath)
+          .audioCodec(outputCodec) // Corrected method for fluent-ffmpeg
+          .on('end', () => {
+            console.log(`Successfully saved WAV file to ${outputPath} with codec ${outputCodec}`);
+            resolve();
+          })
+          .on('error', (err) => {
+            console.error(`Error saving WAV file with ffmpeg: ${err.message}`);
+            reject(err);
+          })
+          .run();
+      });
+    } finally {
+      try {
+        await fs.unlink(tempRawPath);
+      } catch (err) {
+        // Log error but don't throw, as the main operation might have succeeded/failed already
+        console.warn(`Failed to delete temporary raw audio file: ${tempRawPath}`, err);
+      }
+    }
   }
   
   /**

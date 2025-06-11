@@ -1,52 +1,22 @@
 const fs = require('fs').promises;
 const path = require('path');
+const AudioUpscaler = require('./src/audioUpscaler'); // Use the real AudioUpscaler
 const { ContentAnalyzer } = require('./src/contentAnalyzer');
-const { Spectrogram } = require('./src/spectrogram');
-const { PhaseReconstructor } = require('./src/phaseReconstructor');
+// Spectrogram and PhaseReconstructor might not be directly used in test.js anymore
+// const { Spectrogram } = require('./src/spectrogram');
+// const { PhaseReconstructor } = require('./src/phaseReconstructor');
 
-// Simple AudioUpscaler for testing
-class TestAudioUpscaler {
-  constructor() {
-    this.progressCallback = null;
-  }
-  
-  onProgress(callback) {
-    this.progressCallback = callback;
-  }
-  
-  reportProgress(percent) {
-    if (this.progressCallback) {
-      this.progressCallback(Math.round(percent));
-    }
-  }
-  
-  async upscale(inputPath, outputPath) {
-    try {
-      // Simulate upscaling process with progress updates
-      for (let i = 0; i <= 100; i += 5) {
-        this.reportProgress(i);
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-      
-      // For demonstration, we'll just copy the file
-      await fs.copyFile(inputPath, outputPath);
-      
-      return true;
-    } catch (error) {
-      console.error('Error during upscaling:', error);
-      throw error;
-    }
-  }
-}
 
 async function runTest() {
   try {
-    console.log('Neural Audio Upscaler Test');
-    console.log('=========================');
+    console.log('Neural Audio Upscaler - Standard Test');
+    console.log('====================================');
     
     // Initialize components
-    console.log('\nInitializing components...');
-    const audioUpscaler = new TestAudioUpscaler();
+    console.log('\nInitializing components for standard test...');
+    const audioUpscaler = new AudioUpscaler({ trainingMode: false }); // Ensure training mode is off for standard test
+    await audioUpscaler.initialize(); // Wait for async initialization
+
     const contentAnalyzer = new ContentAnalyzer();
     await contentAnalyzer.initialize();
     
@@ -86,12 +56,64 @@ async function runTest() {
       console.log(`Output saved to: ${outputPath}`);
     }
     
-    console.log('\nAll tests completed successfully!');
-    
+    console.log('\nAll standard tests completed successfully!');
+
   } catch (error) {
-    console.error('Error during test:', error);
+    console.error('Error during standard test:', error);
+    // Decide if this should throw to stop all tests or just log
   }
 }
 
-// Run the test
-runTest();
+async function runFineTuningTest() {
+  console.log('\n\nNeural Audio Upscaler - Fine-Tuning Test');
+  console.log('=========================================');
+  const inputPath = './uploads/test_tone.wav'; // Ensure this file exists
+  const outputPath = './uploads/test_tone_finetuned_output.wav';
+
+  try {
+    // Ensure the input file exists before running the test
+    await fs.access(inputPath);
+    console.log(`Input file ${inputPath} found.`);
+  } catch (e) {
+    console.error(`Error: Input file ${inputPath} not found. Skipping fine-tuning test.`);
+    console.log("Please create a simple WAV file (e.g., a short tone) at ./uploads/test_tone.wav to run this test.");
+    return;
+  }
+
+  try {
+    console.log('\nInitializing components for fine-tuning test...');
+    // Disable pre/post processing to directly test model output for fine-tuning
+    const ftUpscaler = new AudioUpscaler({
+      trainingMode: true,
+      usePreprocessing: false,
+      usePostprocessing: false
+    });
+    await ftUpscaler.initialize(); // Wait for async initialization
+
+    console.log(`\nProcessing file for fine-tuning: ${inputPath}`);
+
+    // Set up progress reporting
+    ftUpscaler.onProgress((progress) => {
+      process.stdout.write(`\rFine-tuning test progress: ${progress}%`);
+    });
+
+    await ftUpscaler.upscale(inputPath, outputPath);
+    console.log('\nFine-tuning upscale complete!');
+
+    // Verify output file creation
+    await fs.access(outputPath);
+    console.log(`Output file for fine-tuning test created successfully: ${outputPath}`);
+    
+    console.log('\nFine-tuning test completed successfully!');
+
+  } catch (error) {
+    console.error('Error during fine-tuning test:', error);
+  }
+}
+
+
+// Run the tests
+(async () => {
+  await runTest();
+  await runFineTuningTest();
+})();

@@ -83,18 +83,26 @@ class ModelTrainer {
       
       // Create TensorFlow datasets
       const trainingDataset = tf.data.array(trainingData)
-        .map(item => ({
-          xs: item.lowQuality,
-          ys: item.highQuality
-        }))
+        .map(item => {
+          // Reshape tensors to [segmentLength, 1] for Conv1D
+          const segmentLength = item.lowQuality.shape[0];
+          return {
+            xs: item.lowQuality.reshape([segmentLength, 1]),
+            ys: item.highQuality.reshape([segmentLength, 1])
+          };
+        })
         .batch(this.options.batchSize)
         .shuffle(100);
       
       const validationDataset = tf.data.array(validationData)
-        .map(item => ({
-          xs: item.lowQuality,
-          ys: item.highQuality
-        }))
+        .map(item => {
+          // Reshape tensors to [segmentLength, 1] for Conv1D
+          const segmentLength = item.lowQuality.shape[0];
+          return {
+            xs: item.lowQuality.reshape([segmentLength, 1]),
+            ys: item.highQuality.reshape([segmentLength, 1])
+          };
+        })
         .batch(this.options.batchSize);
       
       // Configure training
@@ -221,6 +229,8 @@ class ModelTrainer {
         // Make sure we have the same number of segments
         const numSegments = Math.min(lowQualitySegments.length, highQualitySegments.length);
         
+        console.log(`[ModelTrainer.createDataset] File: ${lowQualityFiles[i]}, LQ Segments: ${lowQualitySegments.length}, HQ Segments: ${highQualitySegments.length}, Min Segments: ${numSegments}`);
+
         // Add segments to dataset
         for (let j = 0; j < numSegments; j++) {
           dataset.push({
@@ -243,87 +253,152 @@ class ModelTrainer {
    * @returns {Array} Array of audio segments
    */
   async extractAudioSegments(filePath) {
-    // Convert to WAV for processing
-    const tempWavPath = `${filePath}.temp.wav`;
-    
+    let processingFilePath = filePath;
+    let needsConversion = true;
+    let tempWavPath = null;
+
     try {
-      // Convert to standard format
-      await new Promise((resolve, reject) => {
-        ffmpeg(filePath)
-          .output(tempWavPath)
-          .audioCodec('pcm_s16le')
-          .audioChannels(1) // Mono for simplicity
-          .audioFrequency(44100)
-          .on('end', resolve)
-          .on('error', reject)
-          .run();
+      // Check if input file exists
+      await fs.access(filePath);
+      console.log(`[ModelTrainer.extractAudioSegments] Input file ${filePath} exists.`);
+
+      // Probe file to see if conversion is needed
+      const metadata = await new Promise((resolve, reject) => {
+        ffmpeg.ffprobe(filePath, (err, data) => {
+          if (err) return reject(err);
+          resolve(data);
+        });
       });
+
+      const audioStream = metadata.streams.find(s => s.codec_type === 'audio');
+      if (audioStream &&
+          audioStream.codec_name === 'pcm_s16le' &&
+          audioStream.channels === 1 &&
+          audioStream.sample_rate === '44100') {
+        console.log(`[ModelTrainer.extractAudioSegments] File ${filePath} already in target format. Skipping conversion.`);
+        needsConversion = false;
+      } else {
+        console.log(`[ModelTrainer.extractAudioSegments] File ${filePath} requires conversion. Current format: ${audioStream ? JSON.stringify(audioStream) : 'unknown'}`);
+      }
+
+      if (needsConversion) {
+        // Use a distinct temporary file name in a known directory
+        const tempFileName = `model_trainer_temp_${path.basename(filePath)}_${Date.now()}.wav`;
+        tempWavPath = path.join(this.options.checkpointDir, tempFileName);
+        processingFilePath = tempWavPath;
+
+        // Convert to standard format
+        await new Promise((resolve, reject) => {
+          console.log(`[ModelTrainer.extractAudioSegments] Starting ffmpeg conversion for: ${filePath} to ${tempWavPath}`);
+          const command = ffmpeg(filePath)
+            .inputFormat('wav') // Assuming input is wav, ffprobe would give more details for others
+            .output(tempWavPath)
+            .audioCodec('pcm_s16le')
+            .audioChannels(1)
+            .audioFrequency(44100)
+            .on('error', function(err, stdout, stderr) {
+              console.error(`[ModelTrainer.extractAudioSegments] ffmpeg error for ${filePath}:`, err.message);
+              console.error(`[ModelTrainer.extractAudioSegments] ffmpeg stderr for ${filePath}:`, stderr);
+              reject(err);
+            })
+            .on('end', function(stdout, stderr) {
+              console.log(`[ModelTrainer.extractAudioSegments] ffmpeg conversion finished successfully for ${filePath}.`);
+              resolve();
+            });
+          command.run();
+        });
+      }
       
-      // Read the WAV file
-      const buffer = await fs.readFile(tempWavPath);
+      // Read the WAV file (either original or converted temp file)
+      const buffer = await fs.readFile(processingFilePath);
       
       // Parse WAV header (simplified)
+      // This parsing assumes a very standard WAV structure, which ffmpeg should produce.
       const sampleRate = buffer.readUInt32LE(24);
-      const numChannels = buffer.readUInt16LE(22);
-      const bitsPerSample = buffer.readUInt16LE(34);
-      const dataSize = buffer.readUInt32LE(40);
+      const numChannels = buffer.readUInt16LE(22); // Should be 1 if converted or checked
+      const bitsPerSample = buffer.readUInt16LE(34); // Should be 16 if converted or checked
+
+      let dataOffset = 44; // Standard WAV header size
+      let dataSize = buffer.readUInt32LE(40);
+
+      // Basic check for 'data' chunk, similar to AudioUpscaler's readAudioFile
+      const dataChunkId = buffer.toString('ascii', 36, 40);
+      if (dataChunkId !== 'data') {
+        let offset = 12;
+        let foundDataChunk = false;
+        while(offset < buffer.length - 8) {
+            const chunkId = buffer.toString('ascii', offset, offset + 4);
+            const chunkSize = buffer.readUInt32LE(offset + 4);
+            if (chunkId === 'data') {
+                dataOffset = offset + 8;
+                dataSize = chunkSize;
+                foundDataChunk = true;
+                break;
+            }
+            offset += 8 + chunkSize;
+            if (chunkSize <= 0) { // Avoid infinite loop on malformed chunk
+                console.warn(`[ModelTrainer.extractAudioSegments] Encountered zero or negative chunk size for ${chunkId} in ${processingFilePath}`);
+                break;
+            }
+        }
+        if (!foundDataChunk) {
+             console.warn(`[ModelTrainer.extractAudioSegments] Could not find 'data' chunk in ${processingFilePath}. Using default offset/size. This might be incorrect.`);
+        }
+      }
+
+      console.log(`[ModelTrainer.extractAudioSegments] Processing file: ${processingFilePath}, Parsed Header - sampleRate: ${sampleRate}, numChannels: ${numChannels}, bitsPerSample: ${bitsPerSample}, dataSize: ${dataSize}`);
       
-      // Extract audio data
-      const dataOffset = 44; // Standard WAV header size
-      const numSamples = dataSize / (bitsPerSample / 8) / numChannels;
+      const bytesPerSampleCalc = bitsPerSample / 8;
+      if (bytesPerSampleCalc === 0 || numChannels === 0) {
+        throw new Error(`Invalid WAV properties: bytesPerSampleCalc=${bytesPerSampleCalc}, numChannels=${numChannels}`);
+      }
+      const numSamples = dataSize / bytesPerSampleCalc / numChannels;
+      console.log(`[ModelTrainer.extractAudioSegments] Calculated numSamples: ${numSamples}`);
       
       // Convert to float32 samples
       const samples = new Float32Array(numSamples);
-      const bytesPerSample = bitsPerSample / 8;
       const scale = 1.0 / (1 << (bitsPerSample - 1));
       
       for (let i = 0; i < numSamples; i++) {
-        const sampleOffset = dataOffset + i * bytesPerSample;
+        const sampleOffset = dataOffset + (i * numChannels) * bytesPerSampleCalc; // For mono, (i * numChannels) is just i
         
-        // Read sample based on bit depth
         let sample = 0;
         if (bitsPerSample === 16) {
           sample = buffer.readInt16LE(sampleOffset);
-        } else if (bitsPerSample === 24) {
-          // 24-bit samples need special handling
-          const b1 = buffer[sampleOffset];
-          const b2 = buffer[sampleOffset + 1];
-          const b3 = buffer[sampleOffset + 2];
-          sample = ((b3 << 16) | (b2 << 8) | b1) << 8 >> 8; // Sign extension
-        } else if (bitsPerSample === 32) {
-          sample = buffer.readInt32LE(sampleOffset);
-        } else {
-          // Default to 16-bit
+        } else { // Should always be 16-bit due to conversion/check
+          console.warn(`[ModelTrainer.extractAudioSegments] Unexpected bitsPerSample ${bitsPerSample} in ${processingFilePath}. Treating as 16-bit.`);
           sample = buffer.readInt16LE(sampleOffset);
         }
-        
-        // Normalize to [-1, 1]
         samples[i] = sample * scale;
       }
       
-      // Segment the audio into training chunks
-      const segmentSize = 8192; // ~0.2 seconds at 44.1kHz
+      // Segment the audio
+      const segmentSize = 8192;
       const segments = [];
-      
-      for (let i = 0; i < samples.length - segmentSize; i += segmentSize / 2) { // 50% overlap
-        const segment = samples.slice(i, i + segmentSize);
-        if (segment.length === segmentSize) {
+      if (numSamples >= segmentSize) {
+        for (let i = 0; i <= samples.length - segmentSize; i += segmentSize / 2) { // Use <= for the loop condition
+          const segment = samples.slice(i, i + segmentSize);
           segments.push(segment);
         }
+      } else {
+        console.log(`[ModelTrainer.extractAudioSegments] Not enough samples (${numSamples}) to create segments of size ${segmentSize}.`);
       }
       
-      // Clean up temp file
-      await fs.unlink(tempWavPath);
+      if (tempWavPath && needsConversion) { // Clean up only if we created a temp file
+        await fs.unlink(tempWavPath);
+      }
       
+      console.log(`[ModelTrainer.extractAudioSegments] File: ${filePath} (processed from ${processingFilePath}), Samples read: ${samples.length}, Segments created: ${segments.length}`);
       return segments;
     } catch (error) {
-      // Clean up temp file on error
-      try {
-        await fs.unlink(tempWavPath);
-      } catch (e) {
-        // Ignore cleanup errors
+      console.error(`[ModelTrainer.extractAudioSegments] Error processing ${filePath}:`, error);
+      if (tempWavPath && needsConversion) { // Attempt cleanup on error too
+        try {
+          await fs.unlink(tempWavPath);
+        } catch (e) {
+          // Ignore cleanup errors
+        }
       }
-      
       throw error;
     }
   }
