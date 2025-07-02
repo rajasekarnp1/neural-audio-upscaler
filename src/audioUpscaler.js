@@ -2,6 +2,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const ffmpeg = require('fluent-ffmpeg');
 const tf = require('@tensorflow/tfjs-node');
+const WaveFile = require('wavefile').WaveFile; // Added
 const { Spectrogram } = require('./spectrogram');
 const { PhaseReconstructor } = require('./phaseReconstructor');
 const { ContentAnalyzer } = require('./contentAnalyzer');
@@ -390,114 +391,148 @@ class AudioUpscaler {
   }
   
   async readAudioFile(filePath) {
-    // In a real implementation, this would parse the WAV file properly
-    // For this demo, we'll return a simple structure
-    const buffer = await fs.readFile(filePath);
-    
-    return {
-      buffer,
-      filePath
-    };
-  }
-  
-  async processAudio(audioData, model, progressCallback) {
-    // This is where the actual audio upscaling would happen
-    // In a real implementation, we would:
-    // 1. Convert buffer to audio samples
-    // 2. Apply ML model to enhance audio in frequency domain
-    // 3. Convert back to buffer
-    
     try {
-      // Create a spectrogram for frequency-domain processing
-      const spectrogram = new Spectrogram();
-      
-      // Convert to WAV format for processing
-      const wavBuffer = audioData.buffer;
-      
-      // Parse WAV header (simplified)
-      const sampleRate = wavBuffer.readUInt32LE(24);
-      const numChannels = wavBuffer.readUInt16LE(22);
-      const bitsPerSample = wavBuffer.readUInt16LE(34);
-      const dataSize = wavBuffer.readUInt32LE(40);
-      
-      // Extract audio data
-      const dataOffset = 44; // Standard WAV header size
-      const numSamples = dataSize / (bitsPerSample / 8) / numChannels;
-      
-      // Process each channel
-      const enhancedChannels = [];
-      
-      for (let channel = 0; channel < numChannels; channel++) {
-        // Extract channel data
-        const samples = new Float32Array(numSamples / numChannels);
-        const bytesPerSample = bitsPerSample / 8;
-        const scale = 1.0 / (1 << (bitsPerSample - 1));
-        
-        for (let i = 0; i < samples.length; i++) {
-          const sampleOffset = dataOffset + (i * numChannels + channel) * bytesPerSample;
-          
-          // Read sample based on bit depth
-          let sample = 0;
-          if (bitsPerSample === 16) {
-            sample = wavBuffer.readInt16LE(sampleOffset);
-          } else if (bitsPerSample === 24) {
-            // 24-bit samples need special handling
-            const b1 = wavBuffer[sampleOffset];
-            const b2 = wavBuffer[sampleOffset + 1];
-            const b3 = wavBuffer[sampleOffset + 2];
-            sample = ((b3 << 16) | (b2 << 8) | b1) << 8 >> 8; // Sign extension
-          } else if (bitsPerSample === 32) {
-            sample = wavBuffer.readInt32LE(sampleOffset);
-          } else {
-            // Default to 16-bit
-            sample = wavBuffer.readInt16LE(sampleOffset);
-          }
-          
-          // Normalize to [-1, 1]
-          samples[i] = sample * scale;
-        }
-        
-        // For demonstration, we'll simulate processing with progress updates
-        // In a real implementation, we would:
-        // 1. Convert to spectrogram
-        // 2. Apply neural model to enhance spectrogram
-        // 3. Reconstruct phase
-        // 4. Convert back to time domain
-        
-        // Simulate processing
-        await new Promise(resolve => setTimeout(resolve, 200));
-        if (progressCallback) {
-          progressCallback((channel + 0.3) / numChannels * 100);
-        }
-        
-        // Just copy the samples for now
-        enhancedChannels.push(samples);
-        
-        if (progressCallback) {
-          progressCallback((channel + 1) / numChannels * 100);
-        }
+      const buffer = await fs.readFile(filePath);
+      const wav = new WaveFile(buffer);
+
+      if (wav.fmt.audioFormat !== 1 && wav.fmt.audioFormat !== 3) { // PCM = 1, IEEE Float = 3
+          // If not PCM or float, attempt to convert with ffmpeg (basic ffmpeg integration)
+          console.warn(`Input file ${filePath} is not in standard WAV format (PCM/Float). Attempting conversion.`);
+          const tempWavPath = filePath + '.temp.wav';
+          await new Promise((resolve, reject) => {
+              ffmpeg(filePath)
+                  .output(tempWavPath)
+                  .audioCodec('pcm_s16le') // Convert to 16-bit PCM
+                  .audioFrequency(wav.fmt.sampleRate || 44100) // Preserve sample rate or default
+                  .on('end', resolve)
+                  .on('error', (err) => reject(new Error(`FFmpeg conversion failed: ${err.message}`)))
+                  .run();
+          });
+          const convertedBuffer = await fs.readFile(tempWavPath);
+          const convertedWav = new WaveFile(convertedBuffer);
+          await fs.unlink(tempWavPath); // Clean up temp file
+          // Use the converted wav file's info
+           return {
+              samples: convertedWav.getSamples(true, Float32Array), // Normalized Float32 samples
+              sampleRate: convertedWav.fmt.sampleRate,
+              numChannels: convertedWav.fmt.numChannels,
+              bitDepth: convertedWav.fmt.bitsPerSample // Effective bit depth after conversion
+          };
       }
-      
-      // Create a new WAV buffer with enhanced audio
-      // For demonstration, we'll just copy the original buffer
-      
+
       return {
-        buffer: wavBuffer,
-        enhancedChannels,
-        sampleRate,
-        numChannels,
-        bitsPerSample
+          samples: wav.getSamples(true, Float32Array), // Normalized Float32 samples
+          sampleRate: wav.fmt.sampleRate,
+          numChannels: wav.fmt.numChannels,
+          bitDepth: wav.fmt.bitsPerSample
       };
     } catch (error) {
-      console.error('Error in audio processing:', error);
-      // Return original data on error
-      return audioData;
+      console.error(`Error reading audio file ${filePath}:`, error);
+      throw new Error(`Failed to read or parse audio file ${filePath}: ${error.message}`);
     }
   }
   
-  async saveAudioFile(audioData, outputPath) {
-    // Write the processed audio buffer to the output file
-    await fs.writeFile(outputPath, audioData.buffer);
+  async processAudio(inputAudioData, model, progressCallback) {
+    try {
+      let monoSamples;
+      if (inputAudioData.numChannels > 1) {
+          monoSamples = new Float32Array(inputAudioData.samples.length / inputAudioData.numChannels);
+          for (let i = 0; i < monoSamples.length; i++) {
+              monoSamples[i] = inputAudioData.samples[i * inputAudioData.numChannels]; // Take first channel
+          }
+      } else {
+          monoSamples = inputAudioData.samples;
+      }
+
+      const segmentLength = 4096; // Example segment length for the model
+      const overlap = 2048;      // Example overlap
+      const step = segmentLength - overlap;
+      const outputSegments = [];
+      let totalProcessed = 0;
+
+      for (let i = 0; i < monoSamples.length; i += step) {
+          const currentSegmentOriginal = monoSamples.slice(i, i + segmentLength);
+          if (currentSegmentOriginal.length === 0) continue;
+
+          let currentSegmentPadded = currentSegmentOriginal;
+          if (currentSegmentOriginal.length < segmentLength) {
+              currentSegmentPadded = new Float32Array(segmentLength).fill(0);
+              currentSegmentPadded.set(currentSegmentOriginal);
+          }
+          
+          const inputTensor = tf.tensor3d(currentSegmentPadded, [1, segmentLength, 1]);
+          const outputTensor = model.predict(inputTensor); // Assuming model is already loaded
+          const enhancedSegmentData = await outputTensor.data(); // Float32Array
+          tf.dispose([inputTensor, outputTensor]);
+
+          // Store the processed segment. This is a simplified version of Overlap-Add.
+          // It assumes model output length matches input segment length.
+          // For true OLA, windowing would be applied to enhancedSegmentData before adding.
+          let segmentToStore = enhancedSegmentData.slice(0, currentSegmentOriginal.length);
+
+          outputSegments.push(segmentToStore);
+
+          totalProcessed += currentSegmentOriginal.length;
+          if (progressCallback) {
+              progressCallback((totalProcessed / monoSamples.length) * 100);
+          }
+      }
+
+      // Simple concatenation of output segments.
+      // Proper OLA would involve windowing and summing overlapping regions.
+      const totalOutputLength = outputSegments.reduce((sum, s) => sum + s.length, 0);
+      const finalOutputSamples = new Float32Array(totalOutputLength);
+      let currentPosition = 0;
+      for (const seg of outputSegments) {
+          finalOutputSamples.set(seg, currentPosition);
+          currentPosition += seg.length;
+      }
+
+      return {
+          samples: finalOutputSamples,
+          sampleRate: inputAudioData.sampleRate,
+          numChannels: 1, // Output is mono
+          bitDepth: inputAudioData.bitDepth // Or a target bitDepth like 16
+      };
+    } catch (error) {
+      console.error('Error in audio processing:', error);
+      throw new Error(`Failed to process audio: ${error.message}`);
+    }
+  }
+  
+  async saveAudioFile(enhancedAudioData, outputPath) {
+    try {
+      const wav = new WaveFile();
+
+      let samplesToSave = enhancedAudioData.samples;
+      let bitDepthString = enhancedAudioData.bitDepth === 32 ? '32f' : '16';
+
+      if (enhancedAudioData.bitDepth === 24) {
+          console.warn("Original bit depth was 24-bit. Saving as 16-bit PCM.");
+          bitDepthString = '16';
+      }
+
+      if (bitDepthString === '16') {
+           // Convert Float32 samples to Int16 samples
+          const int16Samples = new Int16Array(enhancedAudioData.samples.length);
+          for (let i = 0; i < enhancedAudioData.samples.length; i++) {
+              const val = Math.max(-1.0, Math.min(1.0, enhancedAudioData.samples[i]));
+              int16Samples[i] = val * 32767;
+          }
+          samplesToSave = int16Samples;
+      }
+
+      wav.fromScratch(
+          enhancedAudioData.numChannels,
+          enhancedAudioData.sampleRate,
+          bitDepthString,
+          samplesToSave
+      );
+      await fs.writeFile(outputPath, wav.toBuffer());
+    } catch (error) {
+      console.error(`Error saving audio file ${outputPath}:`, error);
+      throw new Error(`Failed to save audio file ${outputPath}: ${error.message}`);
+    }
   }
   
   /**

@@ -1,3 +1,5 @@
+const FFT = require('fft.js');
+
 class Spectrogram {
   constructor(options = {}) {
     this.fftSize = options.fftSize || 2048;
@@ -57,25 +59,26 @@ class Spectrogram {
   }
   
   performFFT(signal) {
-    // Simplified FFT implementation
-    // In a real implementation, we would use a proper FFT library
-    const n = signal.length;
-    const real = new Float32Array(n);
-    const imag = new Float32Array(n);
-    
-    // Initialize with signal
-    for (let i = 0; i < n; i++) {
-      real[i] = signal[i];
+    // Ensure signal is Float32Array
+    if (!(signal instanceof Float32Array)) {
+      signal = new Float32Array(signal);
     }
-    
-    // Perform FFT (very simplified)
-    // This is just a placeholder - in a real implementation we would use a proper FFT algorithm
-    for (let i = 0; i < n; i++) {
-      for (let j = 0; j < n; j++) {
-        const angle = -2 * Math.PI * i * j / n;
-        real[i] += signal[j] * Math.cos(angle);
-        imag[i] += signal[j] * Math.sin(angle);
-      }
+
+    const f = new FFT(this.fftSize);
+    const complexSpectrum = f.createComplexArray();
+    f.realTransform(complexSpectrum, signal);
+    // f.dispose(); // Consider if fft.js has a dispose method for WASM/memory management
+
+    // De-interleave complexSpectrum into real and imag arrays
+    // The output of realTransform is half-spectrum: [r0, i0, r1, i1, ..., r(N/2), i(N/2)]
+    // where N is fftSize. The length of complexSpectrum is N.
+    // real part has N/2 + 1 components, imag part has N/2 + 1 components.
+    const real = new Float32Array(this.fftSize / 2 + 1);
+    const imag = new Float32Array(this.fftSize / 2 + 1);
+
+    for (let i = 0; i <= this.fftSize / 2; i++) {
+      real[i] = complexSpectrum[2 * i];
+      imag[i] = complexSpectrum[2 * i + 1];
     }
     
     return { real, imag };
@@ -128,20 +131,38 @@ class Spectrogram {
   }
   
   performInverseFFT(real, imag) {
-    // Simplified inverse FFT implementation
-    const n = real.length;
-    const result = new Float32Array(n);
+    // real and imag are full spectrum (length this.fftSize) as prepared by toTimeDomain
+    if (real.length !== this.fftSize || imag.length !== this.fftSize) {
+      throw new Error(`performInverseFFT: real and imag arrays must have length equal to fftSize (${this.fftSize}). Got ${real.length}`);
+    }
+
+    const f = new FFT(this.fftSize);
+    const complexSpectrumInput = f.createComplexArray();
+
+    // Interleave real and imag into complexSpectrumInput
+    for (let i = 0; i < this.fftSize; i++) {
+      complexSpectrumInput[2 * i] = real[i];
+      complexSpectrumInput[2 * i + 1] = imag[i];
+    }
+
+    // Output array for the time-domain signal (will be complex interleaved)
+    const timeDomainComplexOutput = f.createComplexArray();
     
-    // Perform inverse FFT (very simplified)
-    // This is just a placeholder - in a real implementation we would use a proper IFFT algorithm
-    for (let i = 0; i < n; i++) {
-      for (let j = 0; j < n; j++) {
-        const angle = 2 * Math.PI * i * j / n;
-        result[i] += real[j] * Math.cos(angle) - imag[j] * Math.sin(angle);
-      }
-      result[i] /= n;
+    // Perform the inverse transform
+    f.inverseTransform(timeDomainComplexOutput, complexSpectrumInput);
+    // f.dispose(); // Consider if fft.js has a dispose method
+
+    // Extract the real part as the result
+    const result = new Float32Array(this.fftSize);
+    for (let i = 0; i < this.fftSize; i++) {
+      result[i] = timeDomainComplexOutput[2 * i];
     }
     
+    // Normalize the output (common practice for IFFT)
+    for (let i = 0; i < this.fftSize; i++) {
+      result[i] = result[i] / this.fftSize;
+    }
+
     return result;
   }
 }
