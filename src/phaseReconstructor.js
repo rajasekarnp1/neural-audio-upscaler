@@ -19,27 +19,33 @@ class PhaseReconstructor {
     };
     
     // Iterative phase reconstruction
+    // TODO: Implement a proper phase reconstruction algorithm (e.g., Griffin-Lim).
+    // The current implementation is a placeholder and does not perform actual iterative phase reconstruction.
+    // It simulates a phase update by blending with the reference phase, which is not a valid technique for reconstruction.
+    console.warn("PhaseReconstructor.reconstruct is a placeholder and does not perform actual phase reconstruction.");
+
     for (let iter = 0; iter < this.iterations; iter++) {
-      // In a real implementation, we would:
-      // 1. Convert magnitude and phase to complex spectrogram
-      // 2. Convert to time domain
-      // 3. Convert back to frequency domain
-      // 4. Keep the magnitude from the target, but update the phase
-      
-      // For simplicity, we're just doing a weighted average with the reference phase
-      // This is not true phase reconstruction, just a placeholder
-      const weight = (this.iterations - iter) / this.iterations;
+      // In a real Griffin-Lim implementation, we would:
+      // 1. Combine target magnitude with the current estimated phase.
+      // 2. Convert this complex spectrogram to a time-domain signal (ISTFT/IFFT).
+      // 3. Convert the time-domain signal back to a spectrogram (STFT/FFT).
+      // 4. Use the phase from this new spectrogram as the estimate for the next iteration.
+      //    The magnitude from this new spectrogram is discarded, and the original target magnitude is used again.
+
+      // The current loop is a simplified placeholder and does not follow these steps.
+      // It merely performs a weighted average, which is not how phase reconstruction works.
+      const weight = (this.iterations - iter) / this.iterations; // Example of incorrect placeholder logic
       
       for (let i = 0; i < currentPhase.length; i++) {
-        // Gradually reduce the influence of the reference phase
+        // This is a placeholder operation, not part of a real algorithm.
         result.phase[i] = weight * referenceSpectrogram.phase[i] + 
                          (1 - weight) * currentPhase[i];
         
-        // Update current phase for next iteration
-        currentPhase[i] = result.phase[i];
+        currentPhase[i] = result.phase[i]; // Update for the mock "next iteration"
       }
     }
     
+    // Placeholder: returns a modified phase array based on simplistic blending, not reconstruction.
     return result;
   }
 }

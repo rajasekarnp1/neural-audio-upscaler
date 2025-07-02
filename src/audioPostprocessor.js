@@ -37,8 +37,30 @@ class AudioPostprocessor {
       // Analyze upscaled audio
       const upscaledInfo = await this.analyzeAudio(inputPath);
       console.log('Upscaled audio properties:', upscaledInfo);
+
+      // TODO: Implement final gain adjustment if this.options.matchLoudness or other gain options are true.
+      // Currently, gain adjustment is skipped.
+      if (this.options.matchLoudness) { // Assuming matchLoudness implies some gain adjustment
+          console.warn("AudioPostprocessor: Gain adjustment (e.g., loudness matching) enabled in settings, but actual filter addition is skipped.");
+          // Example: filters.push('loudnorm=I=-16:TP=-1.5:LRA=11'); // Placeholder
+      }
+
+      // TODO: Implement dithering if this.options.applyDithering is true, especially if bit depth changes.
+      // The ffmpeg command itself might handle some dithering automatically depending on codecs,
+      // but explicit dithering options are currently skipped.
+      if (this.options.applyDithering) {
+          console.warn("AudioPostprocessor: Dithering enabled in settings, but explicit dithering filter addition is skipped.");
+          // Example: filters.push('dither=lsr'); // Placeholder, if needed beyond codec defaults
+      }
+
+      // TODO: Implement any other final mastering touches (e.g., soft clipping, subtle EQ).
+      // Currently, these are skipped.
+      console.warn("AudioPostprocessor: Final mastering touches (e.g., soft clipping) are placeholders/skipped.");
+      // Example: filters.push('afftfilt=real=\'hypot(re,im)*sin(0)\':imag=\'hypot(re,im)*cos(0)\''); // Placeholder for some effect
       
       // Skip filters entirely to avoid compatibility issues
+      // NOTE: The 'filters' array remains empty, and unlike preprocessor, it's not even passed to an .audioFilters() call here.
+      // The ffmpeg command below directly sets codecs and options without using the `filters` array.
       
       // Progress update
       if (progressCallback) progressCallback(30);

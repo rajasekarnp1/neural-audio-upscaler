@@ -12,7 +12,7 @@ const { ModelTrainer } = require('./modelTrainer');
 class AudioUpscaler {
   constructor(options = {}) {
     this.options = {
-      trainingMode: false,
+      trainingMode: false, // Relates to enabling/disabling fine-tuning capabilities via modelTrainer
       usePreprocessing: true,
       usePostprocessing: true,
       preserveQuality: true,
@@ -356,6 +356,11 @@ class AudioUpscaler {
           console.log('Model would be updated in a production environment');
           
           // Skip actual training for now since it's causing issues
+          // TODO: Implement or re-enable actual model fine-tuning logic if trainingMode is active.
+          // The call to modelTrainer.fineTuneModel is currently commented out.
+          // If re-enabled, ensure it handles data appropriately and updates the model.
+          // Note: this.options.trainingMode controls if this block is entered.
+          console.warn("AudioUpscaler.upscale: Fine-tuning within upscale() is currently a placeholder or skipped (modelTrainer.fineTuneModel is commented out).");
           // await this.modelTrainer.fineTuneModel(
           //   model,
           //   [inputPath], // Low quality
@@ -364,7 +369,7 @@ class AudioUpscaler {
           //   () => {} // No progress reporting for background training
           // );
           
-          console.log('Training example recorded for future model updates');
+          console.log('Training example recorded for future model updates (actual fine-tuning call is currently commented out).');
         } catch (err) {
           console.warn('Failed to update model:', err);
           // Continue even if training fails
@@ -458,19 +463,22 @@ class AudioUpscaler {
         }
         
         // For demonstration, we'll simulate processing with progress updates
-        // In a real implementation, we would:
-        // 1. Convert to spectrogram
-        // 2. Apply neural model to enhance spectrogram
-        // 3. Reconstruct phase
-        // 4. Convert back to time domain
+        // TODO: Implement the core audio upscaling processing using the provided AI model.
+        // This function currently acts as a placeholder and simulates upscaling.
+        // A real implementation would involve:
+        // 1. Converting audio samples to a suitable representation for the model (e.g., spectrogram).
+        // 2. Feeding the data through the TensorFlow model (`model.predict()`).
+        // 3. Reconstructing the time-domain audio from the model's output (e.g., IFFT, phase reconstruction).
+        // The current code only copies samples and simulates delay.
+        console.warn("AudioUpscaler.processAudio is a placeholder and does not perform actual AI-based upscaling.");
         
         // Simulate processing
-        await new Promise(resolve => setTimeout(resolve, 200));
+        await new Promise(resolve => setTimeout(resolve, 200)); // Simulates processing time
         if (progressCallback) {
           progressCallback((channel + 0.3) / numChannels * 100);
         }
         
-        // Just copy the samples for now
+        // Just copy the samples for now - this is NOT upscaling.
         enhancedChannels.push(samples);
         
         if (progressCallback) {

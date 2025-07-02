@@ -47,3 +47,11 @@ python3 research_tools/main.py get 2301.00001
 
 -   The tool relies on the public arXiv API. Please be mindful of usage limits if performing many queries.
 -   The parsing of arXiv's Atom XML feed is done using Python's standard libraries.
+
+---
+
+### Developer Notes
+
+*   **Error Logging in `arxiv_http_client.py`:** Please be aware that the detailed error logging within the `fetch_article_metadata` function in `arxiv_http_client.py` (specifically the `try...except` block capturing `requests.exceptions.RequestException`) is currently commented out. As a result, HTTP request errors are handled silently, returning `None` without explicit log output from this module. For debugging or more robust error tracking, these logging lines (utilizing `logger.error(...)`) would need to be uncommented.
+*   **Unused `ARXIV_NAMESPACE` Constant:** The `arxiv_http_client.py` module defines a constant `ARXIV_NAMESPACE = {"arxiv": "http://arxiv.org/api/terms/"}`. While defined with the apparent intention of parsing specific XML namespaces, this constant is not currently utilized within the existing codebase. Future development or refactoring might leverage this constant, or it could be considered for removal if deemed unnecessary.
+---

@@ -69,7 +69,11 @@ class Spectrogram {
     }
     
     // Perform FFT (very simplified)
-    // This is just a placeholder - in a real implementation we would use a proper FFT algorithm
+    // TODO: Implement actual Fast Fourier Transform (FFT) algorithm.
+    // Currently, this function is a placeholder and does not perform a real FFT.
+    // It simulates an FFT output structure for development purposes.
+    // In a real implementation, we would use a proper FFT library or a more accurate algorithm.
+    console.warn("Spectrogram.performFFT is a placeholder and does not perform actual FFT.");
     for (let i = 0; i < n; i++) {
       for (let j = 0; j < n; j++) {
         const angle = -2 * Math.PI * i * j / n;
@@ -133,7 +137,11 @@ class Spectrogram {
     const result = new Float32Array(n);
     
     // Perform inverse FFT (very simplified)
-    // This is just a placeholder - in a real implementation we would use a proper IFFT algorithm
+    // TODO: Implement actual Inverse Fast Fourier Transform (IFFT) algorithm.
+    // Currently, this function is a placeholder and does not perform a real IFFT.
+    // It simulates an IFFT output for development purposes.
+    // In a real implementation, we would use a proper IFFT library or a more accurate algorithm.
+    console.warn("Spectrogram.performInverseFFT is a placeholder and does not perform actual IFFT.");
     for (let i = 0; i < n; i++) {
       for (let j = 0; j < n; j++) {
         const angle = 2 * Math.PI * i * j / n;

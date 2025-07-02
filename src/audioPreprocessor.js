@@ -34,9 +34,32 @@ class AudioPreprocessor {
       // Analyze audio properties
       const audioInfo = await this.analyzeAudio(inputPath);
       console.log('Audio properties:', audioInfo);
+
+      // TODO: Implement resampling if necessary (e.g., to a target sampleRate based on this.options or audioInfo).
+      // console.log("Resampling stage skipped/placeholder.");
+
+      // TODO: Implement noise reduction algorithms if this.options.removeNoise is true.
+      // Currently, noise reduction is skipped.
+      if (this.options.removeNoise) {
+          console.warn("AudioPreprocessor: Noise reduction enabled in settings, but actual filter addition to the 'filters' array is skipped.");
+          // Example: filters.push('agate=threshold=0.1'); // Placeholder for actual filter string
+      }
+
+      // TODO: Implement normalization if this.options.normalizeAudio is true.
+      // Currently, normalization is skipped.
+      if (this.options.normalizeAudio) {
+          console.warn("AudioPreprocessor: Normalization enabled in settings, but actual filter addition to the 'filters' array is skipped.");
+          // Example: filters.push('dynaudnorm'); // Placeholder for actual filter string
+      }
+
+      // TODO: Implement high-pass or low-pass filters if required by options or analysis.
+      // Currently, filter application is skipped.
+      console.warn("AudioPreprocessor: General filter application (e.g., high-pass for rumble) to the 'filters' array is skipped.");
+      // Example: filters.push('highpass=f=80'); // Placeholder for actual filter string
       
       // Skip filters entirely to avoid compatibility issues
       // We'll just copy the audio as-is
+      // NOTE: The 'filters' array remains empty, so no ffmpeg audio filters are applied.
       
       // Progress update
       if (progressCallback) progressCallback(30);
